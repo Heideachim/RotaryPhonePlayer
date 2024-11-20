@@ -13,19 +13,46 @@
   Global variables use 395 bytes (19%) of dynamic memory, leaving 1653 bytes for local variables. Maximum is 2048 bytes.  
 
   Enable USE_DISPLAY in display.ino for Adafruit display --> there is not enough memory available and programm will CRASH :-{
+
+  Pinout Arduino Nano:
+Function   Pins Nano    Function
+========== ==========  ==========   
+           D13    D12
+           3V3    D11
+           ARF    D10
+PHONE      A0     D9    NANO_TX
+           A1     D8    NANO_RX
+BUSY       A2     D7
+LED_STATUS A3     D6
+(SDA)      A4     D5
+(SCL)      A5     D4
+           A6     D3
+           A7     D2
+V_IN5V     +5V    GND
+           RST    RST
+GND        GND    RX0
+           VIN    TX0
+
 */
 
+// for debugging: continously print state of line A0, so it can be easily plottet with Arduino IDEs plotter feater:
+#undef DEBUG_SERIAL_PLOTTER
 
 #include "SoftwareSerial.h"
 #include "DFRobotDFPlayerMini.h"
 
 
-SoftwareSerial playerserial(8, 9); // RX, TX
+SoftwareSerial playerserial(8, 9); // RX, TX, for MP3 player
 DFRobotDFPlayerMini player;
 
 void printDetail(uint8_t type, int value);
 
-
+#define PIN_STATUS_LED 17 // status LED for displaying non-recoverable error. Pin A3 = D17
+#define PIN_CHECK_BUSY 16   // input to check state of MP3 player, pin A3 = D16; LOW if player is playing
+// I2C pins:
+// pin A4 = SDA
+// pin A5 = SCL
+// debug pins:
 #define PIN_HUNGUP 2
 #define PIN_LIFTED 3
 #define PIN_WINDINGUP 4
@@ -45,6 +72,11 @@ void setup() {
   Serial.begin(115200);
   playerserial.begin(9600);
 
+  // ports for status information:
+  pinMode(PIN_STATUS_LED, OUTPUT);
+  pinMode(PIN_CHECK_BUSY, INPUT);
+  digitalWrite(PIN_STATUS_LED, LOW);
+
   // debug pins for state machine:
   pinMode(PIN_HUNGUP, OUTPUT);
   pinMode(PIN_LIFTED, OUTPUT);
@@ -55,10 +87,13 @@ void setup() {
 
   // initialize MP3 player. STALLS IF NOT SUCCESSFUL:
   uint8_t response = player.begin(playerserial, true, false);
+  Serial.println("Player reset...");
+  player.reset();   // reset only once - will sometimes not return and hang, wtf.
   do {
-    player.reset();
+    digitalWrite(PIN_STATUS_LED, HIGH);
     player.waitAvailable(2000);
-    delay(200);
+    digitalWrite(PIN_STATUS_LED, LOW);
+    delay(300);
     response = player.readType();
     printDetail(response, player.read());
   }
@@ -70,6 +105,7 @@ void setup() {
   printDetail(player.readType(), player.read()); // Print error messages from DFPlayer
 
 //  init_display();
+  Serial.println("Initialization done.");
 }
 
 
@@ -109,13 +145,19 @@ int number;     // the number that is beeing dialed
 
 void loop() {
 
-/*
-  if (player.available()) {
-    printDetail(player.readType(), player.read()); //Print the detail message from DFPlayer to handle different errors and states.
+
+  uint8_t type = player.readType();
+  if ((type == DFPlayerError) || (type == DFPlayerCardRemoved) || (type == DFPlayerError)) {
+    printDetail(type, player.read()); //Print the detail message from DFPlayer to handle different errors and states.
+    digitalWrite(PIN_STATUS_LED, HIGH);
+    delay(100);
+    digitalWrite(PIN_STATUS_LED, LOW);
+    delay(200);
   }
-*/
+
   line = analogRead(A0);
 
+#ifdef DEBUG_SERIAL_PLOTTER
   // debug output for plotting curve with analog input and states:
 //  Serial.print("A0:");
   Serial.print(line);
@@ -125,6 +167,7 @@ void loop() {
   Serial.print(" ");
 //  Serial.print(",Number:");
   Serial.println(number*100);
+#endif
 
   // in case of imminent state change, set 'initstate' 
   // variable --> next state will start with its initalization:
